@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <RtAudio.h>
+#include <iostream>
 #include "BelaContext.h"
 
 // Forward declare the user-implemented Bela hooks (from render.cpp)
@@ -26,13 +27,23 @@ int rtAudioCallback(void *outputBuffer, void *inputBuffer, unsigned int nBufferF
 }
 
 int main() {
-    RtAudio dac;
+    RtAudio dac(RtAudio::LINUX_PULSE);
 
     // RtAudio 6 API: Query explicit device IDs directly
     std::vector<unsigned int> deviceIds = dac.getDeviceIds();
     if (deviceIds.empty()) {
         std::cerr << "No audio devices found!\n";
         return 1;
+    }
+
+    const size_t devices(deviceIds.size());
+    std::cout << "Found " << devices << " devices:\n";
+    for (auto i : deviceIds) {
+        RtAudio::DeviceInfo info(dac.getDeviceInfo(i));
+        std::cout << "Index/ID: " << i
+                  << " -> Name: " << info.name
+                  << " (Inputs: " << info.inputChannels
+                  << ", Outputs: " << info.outputChannels << ")\n";
     }
 
     // Stream configuration

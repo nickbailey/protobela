@@ -1,30 +1,34 @@
 # Makefile for all programs in the bela sandpit
 # with automatic dependency scanning
 
+PROGRAMS := beep
+
+beep_SRCS := beep.cxx
+
 BELASTUB := bela.a
-bela_SRCS := render.cxx
+bela_SRCS := bellacontext.cxx
 
-#PROGRAM := hsl
-
-SRCS := $(bela_SRCS)
+SRCS := $(bela_SRCS) $(beep_SRCS)
 
 OBJS := $(SRCS:.cxx=.o)
 DEPDIR := .deps
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
 COMPILE.cc = $(CXX) $(DEPFLAGS) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
 DEPFILES := $(SRCS:%.cxx=$(DEPDIR)/%.d)
+CXXFLAGS += $(shell pkg-config --cflags rtaudio) -std=c++17
+LDLIBS += $(shell pkg-config --libs rtaudio)
 
 .PHONY: all clean
-all: $(BELASTUB) #$(PROGRAM)
+all: $(BELASTUB) $(PROGRAMS)
 
 clean:
-	$(RM) $(OBJS) $(PROGRAM) -r $(DEPDIR)
+	$(RM) $(OBJS) $(PROGRAMS) $(BELASTUB) -r $(DEPDIR)
 
 $(BELASTUB): $(bela_SRCS:.cxx=.o)
 	$(AR) rc $@ $^
 
-#$(PROGRAM): $(OBJS)
-#	$(LINK.cc) $(OUTPUT_OPTION) $^
+beep: $(beep_SRCS:.cxx=.o) $(BELASTUB)
+	$(LINK.cc) $(OUTPUT_OPTION) $^ $(LDLIBS)
 
 %.o: %.cxx $(DEPDIR)/%.d | $(DEPDIR)
 	$(COMPILE.cc) $<

@@ -1,5 +1,5 @@
 #include <cmath>
-#include "BelaContext.h" // Local wrapper (Client will ignore this line on Bela)
+#include "BelaContext.h"
 
 float gPhase = 0.0;
 float gInverseSampleRate;
@@ -28,3 +28,4 @@ void render(BelaContext *context, void *userData) {
 void cleanup(BelaContext *context, void *userData) {
     // End-of-life memory cleanup
 }
+

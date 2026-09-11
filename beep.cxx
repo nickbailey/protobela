@@ -14,7 +14,7 @@ bool setup(BelaContext *context, void *userData) {
 void render(BelaContext *context, void *userData) {
     constexpr float frequency {440};
     constexpr float amplitude {0.05};
-    static const float omega{2.0f*frequency*(float)M_PI/context->audioSampleRate};
+    static const float omega {2.0f*frequency*(float)M_PI/context->audioSampleRate};
 
     static float y1{amplitude * sinf(-1.0f * omega)};
     static float y2{amplitude * sinf(-2.0f * omega)};

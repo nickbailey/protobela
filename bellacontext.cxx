@@ -1,13 +1,21 @@
+#include <atomic>
+#include <cstdint>
 #include <iostream>
-#include <vector>
 #include <RtAudio.h>
-#include <iostream>
+#include <vector>
 #include "BelaContext.h"
 
 // Forward declare the user-implemented Bela hooks (from render.cpp)
 bool setup(BelaContext *context, void *userData);
 void render(BelaContext *context, void *userData);
 void cleanup(BelaContext *context, void *userData);
+
+// Buffers to represent digital and ananlogue I/O
+static uint32_t* digitalInputBuffer;
+// To be implemented as requred. Don't forget to allocate them!'
+//static uint32_t* digitalOutputBuffer;
+//static float* analogueInputBuffer;
+//static float* anlogueOutputBuffer;
 
 // RtAudio callback routing
 int rtAudioCallback(void *outputBuffer, void *inputBuffer, unsigned int nBufferFrames,
@@ -20,6 +28,27 @@ int rtAudioCallback(void *outputBuffer, void *inputBuffer, unsigned int nBufferF
     context.audioOutChannels = 2;
     context.audioFrames = nBufferFrames;
     context.audioSampleRate = 44100.0; // Target sample rate
+    context.analogFrames = 0; // Not currently implemented
+    context.analogInChannels = 0;
+    context.analogOutChannels = 0;
+    context.analogIn = nullptr;
+    context.analogOut = nullptr;
+    context.digitalFrames = nBufferFrames;
+    context.digitalChannels = 4; // set this somewhere sensible!
+    context.digitalIn = digitalInputBuffer;
+    context.digitalOut = nullptr; // not yet implemented
+
+    // Create a local buffer for this block duration
+    std::vector<uint32_t> blockDigitalBuffer(nBufferFrames);
+
+    // Snapshot the atomic value once per block to avoid thread contention mid-loop
+    extern std::atomic<int> gMasterDigitalIn;
+    uint32_t currentInputSnapshot = gMasterDigitalIn.load();
+
+    // Fill the frame block with the snapshot state
+    // Fill the raw array directly using the pointer.
+    // This executes at maximum hardware speed.
+    std::fill_n(digitalInputBuffer, nBufferFrames, currentInputSnapshot);
 
     // Call your portable Bela engine loop
     render(&context, nullptr);
@@ -55,8 +84,19 @@ int main() {
     unsigned int bufferFrames = 128; // Low latency block size
     unsigned int sampleRate = 44100;
 
-    // Call the user setup function before audio stream initializes
-    BelaContext initialContext = {nullptr, nullptr, 2, 2, bufferFrames, (float)sampleRate};
+    // Define known local values before the audio callback first happens
+    BelaContext initialContext = {
+        // Audio I/O
+        nullptr, nullptr, 2, 2, bufferFrames, static_cast<float>(sampleRate),
+        // Analogue I/O ("sliders")
+        0, 0, bufferFrames/2, nullptr, nullptr, static_cast<float>(sampleRate/2),
+        // Ditigal I/O ("switches")
+        16, bufferFrames, nullptr, nullptr
+    };
+
+    // Allocate storage for the digital and analogue I/O buffers if implemented
+    digitalInputBuffer = new uint32_t[bufferFrames];
+
     if(!setup(&initialContext, nullptr)) {
         std::cerr << "Bela setup failed.\n";
         return 1;
@@ -88,5 +128,6 @@ int main() {
 
     // Run clean up routine on exit
     cleanup(&initialContext, nullptr);
+    delete[] digitalInputBuffer;
     return 0;
 }

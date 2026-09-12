@@ -7,7 +7,7 @@ sampleplayer_SRCS := sampleplayer.cxx samplereader.cxx
 beep_SRCS := beep.cxx
 
 BELASTUB := bela.a
-bela_SRCS := bellacontext.cxx
+bela_SRCS := bellacontext.cxx belaiohelpers.cxx digitalinputsim.cxx
 
 SRCS := $(bela_SRCS) $(beep_SRCS) $(sampleplayer_SRCS)
 

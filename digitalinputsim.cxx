@@ -30,7 +30,7 @@ struct DigitalInputSimulator::Impl {
             while (read(STDIN_FILENO, &ch, 1) > 0) {
                 // Check if the user pressed the explicit quit key
                 if (ch == quit_character) {
-                    std::cout << "\n[Bela Mock Engine] Quit key detected. Initiating shutdown...\n";
+                    std::cout << "\nDigital Input Simulator quit key detected. Initiating shutdown...\n";
                     running = false; // Gracefully breaks the while loop
                     return;
                 }
@@ -52,7 +52,7 @@ struct DigitalInputSimulator::Impl {
                     std::cout << "Pin" << pin << " (" << monitored_keys[pin] << "): "
                     << ((currentLatchedMask >> pin) & 1) << " | ";
                 }
-                std::cout << " (Press '" << quit_character << "' to quit) " << std::flush;
+                std::cout << std::flush;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(10));

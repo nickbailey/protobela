@@ -174,6 +174,6 @@ int main(int argc, char* argv[]) {
     if (dac.isStreamOpen()) dac.closeStream();
 
     cleanup(&initialContext, nullptr);
-    std::cout << "[Bela Engine] Shutdown complete.\n";
+    std::cout << "Shutdown complete.\n";
     return 0;
 }

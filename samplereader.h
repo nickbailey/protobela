@@ -6,8 +6,9 @@
 
 class SampleReader {
 public:
-    SampleReader(const char* path);
+    SampleReader(const char* path, bool paused=false);
     bool accumulate(float* buffer, std::size_t length, int channels);
+    bool paused;
 
 private:
     SF_INFO sfinfo;

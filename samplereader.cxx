@@ -7,8 +7,9 @@
 
 #include "samplereader.h"
 
-SampleReader::SampleReader(const char* path) :
-    idx {0}
+SampleReader::SampleReader(const char* path, bool paused) :
+    idx {0},
+    paused{paused}
 {
     // Open the named sound file and read it into memory.
     soundfile = sf_open(path, SFM_READ, &sfinfo);
@@ -35,25 +36,41 @@ SampleReader::SampleReader(const char* path) :
 
 bool SampleReader::accumulate(float* buf, std::size_t frames, int channels) {
 
-    // Implemenation limitation: soundfiles can not be smaller than
-    // a single Bela audio fragment.
+    if (paused) return true;
 
-    // Accumulate up to the end of the buffer or the length of the sample,
-    // whichever comes first.
-    std::size_t last {std::min<std::size_t>(frames, sfinfo.frames - idx)};
-
-    //std::cout << last << '/' << frames << ", " << more << " left\n";
-
-    for (std::size_t i {0}; i < last; i++, idx++)
-        for (int ch {0}; ch < channels ; ch++)
+    // Process the first chunk up to the end of the sound file data memory boundary
+    std::size_t first_leg = std::min<std::size_t>(frames, sfinfo.frames - idx);
+    for (std::size_t i = 0; i < first_leg; i++) {
+        for (int ch = 0; ch < channels; ch++) {
             *buf++ += data[idx];
+        }
+        idx++;
+    }
 
-    if (last < frames) {
-        last = frames - last;
-        idx = 0;
-        for (std::size_t i {idx}; i < last; i++, idx++)
-            for (int ch {0}; ch < channels ; ch++)
-                *buf++ += data[idx++];
+    // Handle wrap-around loops safely without any branch checks inside your rendering code
+    if (first_leg < frames) {
+        std::size_t remaining_frames = frames - first_leg;
+        idx = 0; // Reset player head back to the beginning of the file array
+
+        // If the sample file length is incredibly small, it might wrap around completely
+        // multiple times inside this single audio block request block
+        while (remaining_frames >= sfinfo.frames) {
+            // Fill an entire layout loop of the sample file instantly
+            for (std::size_t i = 0; i < sfinfo.frames; i++) {
+                for (int ch = 0; ch < channels; ch++) {
+                    *buf++ += data[i];
+                }
+            }
+            remaining_frames -= sfinfo.frames;
+        }
+
+        // Process the final remaining fractional frames left in the block request
+        for (std::size_t i = 0; i < remaining_frames; i++) {
+            for (int ch = 0; ch < channels; ch++) {
+                *buf++ += data[idx];
+            }
+            idx++;
+        }
     }
 
     // For the moment we'll always loop'

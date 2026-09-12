@@ -10,16 +10,17 @@ BELASTUB := bela.a
 bela_SRCS := bellacontext.cxx belaiohelpers.cxx digitalinputsim.cxx
 
 SRCS := $(bela_SRCS) $(beep_SRCS) $(sampleplayer_SRCS)
-
 OBJS := $(SRCS:.cxx=.o)
+
 DEPDIR := .deps
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
 COMPILE.cc = $(CXX) $(DEPFLAGS) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
 DEPFILES := $(SRCS:%.cxx=$(DEPDIR)/%.d)
-CXXFLAGS += $(shell pkg-config --cflags rtaudio) -std=c++17
-LDLIBS += $(shell pkg-config --libs rtaudio)
-CXXFLAGS += $(shell pkg-config --cflags sndfile)
-LDLIBS += $(shell pkg-config --libs sndfile)
+
+# Dependency Flag evaluation layers
+CXXFLAGS += $(shell pkg-config --cflags rtaudio) $(shell pkg-config --cflags sndfile) -std=c++17
+LDLIBS += $(shell pkg-config --libs rtaudio) $(shell pkg-config --libs sndfile)
+LDFLAGS += -pthread
 
 .PHONY: all clean
 all: $(BELASTUB) $(PROGRAMS)
@@ -30,11 +31,12 @@ clean:
 $(BELASTUB): $(bela_SRCS:.cxx=.o)
 	$(AR) rc $@ $^
 
+# Fix: Filter out objects for the main arguments and cleanly pass the stub archive link
 beep: $(beep_SRCS:.cxx=.o) $(BELASTUB)
-	$(LINK.cc) $(OUTPUT_OPTION) $^ $(LDLIBS)
+	$(LINK.cc) $(LDFLAGS) $(OUTPUT_OPTION) $(filter %.o, $^) $(BELASTUB) $(LDLIBS)
 
 sampleplayer: $(sampleplayer_SRCS:.cxx=.o) $(BELASTUB)
-	$(LINK.cc) $(OUTPUT_OPTION) $^ $(LDLIBS)
+	$(LINK.cc) $(LDFLAGS) $(OUTPUT_OPTION) $(filter %.o, $^) $(BELASTUB) $(LDLIBS)
 
 %.o: %.cxx $(DEPDIR)/%.d | $(DEPDIR)
 	$(COMPILE.cc) $<
@@ -44,5 +46,4 @@ $(DEPDIR):
 
 $(DEPFILES):
 
-include  $(wildcard $(DEPFILES))
-
+include $(wildcard $(DEPFILES))

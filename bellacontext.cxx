@@ -1,64 +1,111 @@
 #include <atomic>
 #include <cstdint>
+#include <getopt.h>
 #include <iostream>
+#include <memory>
 #include <RtAudio.h>
 #include <vector>
-#include "BelaContext.h"
 
-// Forward declare the user-implemented Bela hooks (from render.cpp)
+#include "BelaContext.h"
+#include "digitalinputsim.h"
+
+// Forward declare the user-implemented Bela hooks
 bool setup(BelaContext *context, void *userData);
 void render(BelaContext *context, void *userData);
 void cleanup(BelaContext *context, void *userData);
 
-// Buffers to represent digital and ananlogue I/O
-static uint32_t* digitalInputBuffer;
-// To be implemented as requred. Don't forget to allocate them!'
-//static uint32_t* digitalOutputBuffer;
-//static float* analogueInputBuffer;
-//static float* anlogueOutputBuffer;
+// Expose the thread-safe atomic tracker owned by digitalinputsim
+extern std::atomic<uint32_t> gSimulatedDigitalWord;
+
+// Persistent heap-allocated memory arrays for safe I/O tracking
+static std::unique_ptr<uint32_t[]> gDigitalInputBuffer;
+static std::unique_ptr<uint32_t[]> gDigitalOutputBuffer;
 
 // RtAudio callback routing
 int rtAudioCallback(void *outputBuffer, void *inputBuffer, unsigned int nBufferFrames,
                     double streamTime, RtAudioStreamStatus status, void *userData)
 {
+    // Snapshot the atomic value once per block to prevent thread contention mid-loop
+    uint32_t currentInputSnapshot = static_cast<uint32_t>(gSimulatedDigitalWord.load());
+
+    // Fast SIMD-optimized fill directly on the safely-allocated pointer block
+    std::fill_n(gDigitalInputBuffer.get(), nBufferFrames, currentInputSnapshot);
+
+    // Clear output state words cleanly for the current frame iteration block
+    std::fill_n(gDigitalOutputBuffer.get(), nBufferFrames, 0);
+
     BelaContext context;
     context.audioIn = (const float*)inputBuffer;
     context.audioOut = (float*)outputBuffer;
-    context.audioInChannels = 2;   // Mirror standard Bela hardware
+    context.audioInChannels = 2;
     context.audioOutChannels = 2;
     context.audioFrames = nBufferFrames;
-    context.audioSampleRate = 44100.0; // Target sample rate
-    context.analogFrames = 0; // Not currently implemented
+    context.audioSampleRate = 44100.0;
+
+    // Analogue stubs
+    context.analogFrames = nBufferFrames / 2;
     context.analogInChannels = 0;
     context.analogOutChannels = 0;
     context.analogIn = nullptr;
     context.analogOut = nullptr;
+    context.analogSampleRate = 22050.0;
+
+    // Digital implementation
     context.digitalFrames = nBufferFrames;
-    context.digitalChannels = 4; // set this somewhere sensible!
-    context.digitalIn = digitalInputBuffer;
-    context.digitalOut = nullptr; // not yet implemented
+    context.digitalChannels = 16; // Standard physical Bela I/O layout width
+    context.digitalIn = gDigitalInputBuffer.get();
+    context.digitalOut = gDigitalOutputBuffer.get();
 
-    // Create a local buffer for this block duration
-    std::vector<uint32_t> blockDigitalBuffer(nBufferFrames);
-
-    // Snapshot the atomic value once per block to avoid thread contention mid-loop
-    extern std::atomic<int> gMasterDigitalIn;
-    uint32_t currentInputSnapshot = gMasterDigitalIn.load();
-
-    // Fill the frame block with the snapshot state
-    // Fill the raw array directly using the pointer.
-    // This executes at maximum hardware speed.
-    std::fill_n(digitalInputBuffer, nBufferFrames, currentInputSnapshot);
-
-    // Call your portable Bela engine loop
+    // Call the portable user Bela loop
     render(&context, nullptr);
     return 0;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+
+    // Default keys for digital I/O simulator
+    std::string keysToMonitor("asdf");
+    char quitKey = 'q'; // Default quit shortcut
+
+    // 2. Configure getopt_long option structures
+    // Add other application flags here in the future
+    static struct option long_options[] = {
+        {"keys",    required_argument, 0, 'k'},
+        {"quit",    required_argument, 0, 'q'},
+        {0,         0,                 0,  0 } // Array terminator
+    };
+
+    // Reset getopt internal index pointers in case other parsing occurred
+    optind = 1;
+    int option_index = 0;
+    int c;
+
+    // Parse command line arguments.
+    // ":" tells getopt to ignore default stdout error prints so we don't pollute the terminal
+    // String "k:q:" signals that both flags expect arguments
+    while ((c = getopt_long(argc, argv, "k:q:", long_options, &option_index)) != -1) {
+        switch (c) {
+            case 'k':
+                if (optarg) keysToMonitor = optarg;
+                break;
+            case 'q':
+                if (optarg && optarg[0] != '\0') {
+                    quitKey = optarg[0]; // Extract the first character
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    // Start a background thread to monitor keystrokes and simulate the toggling of
+    // digital input lines.
+    DigitalInputSimulator inputSimulator(keysToMonitor, quitKey);
+    inputSimulator.start();
+
+    // Explicitly target the selected desktop sound driver framework chosen at compile time
     RtAudio dac(RtAudio::LINUX_PULSE);
 
-    // RtAudio 6 API: Query explicit device IDs directly
     std::vector<unsigned int> deviceIds = dac.getDeviceIds();
     if (deviceIds.empty()) {
         std::cerr << "No audio devices found!\n";
@@ -70,44 +117,41 @@ int main() {
     for (auto i : deviceIds) {
         RtAudio::DeviceInfo info(dac.getDeviceInfo(i));
         std::cout << "Index/ID: " << i
-                  << " -> Name: " << info.name
-                  << " (Inputs: " << info.inputChannels
-                  << ", Outputs: " << info.outputChannels << ")\n";
+        << " -> Name: " << info.name
+        << " (Inputs: " << info.inputChannels
+        << ", Outputs: " << info.outputChannels << ")\n";
     }
 
-    // Stream configuration
     RtAudio::StreamParameters parameters;
-    parameters.deviceId = dac.getDefaultOutputDevice(); // Retrieves a valid default ID
+    parameters.deviceId = dac.getDefaultOutputDevice();
     parameters.nChannels = 2;
     parameters.firstChannel = 0;
 
-    unsigned int bufferFrames = 128; // Low latency block size
+    unsigned int bufferFrames = 128; // Requested block size
     unsigned int sampleRate = 44100;
 
-    // Define known local values before the audio callback first happens
-    BelaContext initialContext = {
-        // Audio I/O
-        nullptr, nullptr, 2, 2, bufferFrames, static_cast<float>(sampleRate),
-        // Analogue I/O ("sliders")
-        0, 0, bufferFrames/2, nullptr, nullptr, static_cast<float>(sampleRate/2),
-        // Ditigal I/O ("switches")
-        16, bufferFrames, nullptr, nullptr
-    };
-
-    // Allocate storage for the digital and analogue I/O buffers if implemented
-    digitalInputBuffer = new uint32_t[bufferFrames];
-
-    if(!setup(&initialContext, nullptr)) {
-        std::cerr << "Bela setup failed.\n";
-        return 1;
-    }
-
-    // RtAudio v6 structural change: No exceptions. Check return enums directly instead.
+    // Open stream first. RtAudio will update the 'bufferFrames' reference
+    // variable if the sound card demands a different buffer size!
     RtAudioErrorType error;
-
     error = dac.openStream(&parameters, nullptr, RTAUDIO_FLOAT32, sampleRate, &bufferFrames, &rtAudioCallback);
     if (error != RTAUDIO_NO_ERROR) {
         std::cerr << "RtAudio Error: Failed to open stream (Code: " << error << ")\n";
+        return 1;
+    }
+
+    // Allocation happens AFTER openStream so arrays scale to match exactly what the sound card uses
+    gDigitalInputBuffer = std::make_unique<uint32_t[]>(bufferFrames);
+    gDigitalOutputBuffer = std::make_unique<uint32_t[]>(bufferFrames);
+
+    // Call the user setup function with runtime-validated structural frames
+    BelaContext initialContext = {
+        nullptr, nullptr, 2, 2, bufferFrames, static_cast<float>(sampleRate),
+        0, 0, bufferFrames / 2, nullptr, nullptr, 22050.0f,
+        16, bufferFrames, nullptr, nullptr
+    };
+
+    if(!setup(&initialContext, nullptr)) {
+        std::cerr << "Bela setup failed.\n";
         return 1;
     }
 
@@ -120,14 +164,16 @@ int main() {
 
     std::cout << "Emulating Bela audio loop (RtAudio v6+ No-Exceptions Engine).\n";
     std::cout << "Using Device ID: " << parameters.deviceId << " with Buffer size: " << bufferFrames << "\n";
-    std::cout << "Press Enter to quit...\n";
-    std::cin.get();
+    std::cout << "Monitoring Latching Toggle Pins using Keys: [" << keysToMonitor << "]\n";
+    std::cout << "[" << quitKey << "] to quit.\n";
 
+    inputSimulator.join();
+
+    std::cout << "Halting audio engine components safely...\n";
     dac.stopStream();
     if (dac.isStreamOpen()) dac.closeStream();
 
-    // Run clean up routine on exit
     cleanup(&initialContext, nullptr);
-    delete[] digitalInputBuffer;
+    std::cout << "[Bela Engine] Shutdown complete.\n";
     return 0;
 }
